@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.exe binary
+*.ico binary
+*.wav binary
+*.onnx binary
+*.dll binary
+*.syso binary
