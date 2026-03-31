@@ -25,7 +25,10 @@ func (r Response) String() string {
 	if len(r.Data) == 0 {
 		return "ok"
 	}
-	b, _ := json.MarshalIndent(r.Data, "", "  ")
+	b, err := json.MarshalIndent(r.Data, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("error: failed to format response: %v", err)
+	}
 	return string(b)
 }
 

@@ -19,6 +19,7 @@ import (
 	"rewind/internal/buffer"
 	"rewind/internal/clip"
 	"rewind/internal/config"
+	"rewind/internal/dsp"
 	"rewind/internal/icon"
 	"rewind/internal/ipc"
 	"rewind/internal/vad"
@@ -78,6 +79,17 @@ func Run() {
 		log.Printf("warning: create samples dir: %v", err)
 	}
 
+	// Auto-discover Lua effect scripts.
+	luaEffects := dsp.DiscoverLuaEffects(config.EffectsDir())
+	for name, ec := range luaEffects {
+		if _, exists := cfg.Yassify.Effects[name]; !exists {
+			cfg.Yassify.Effects[name] = ec
+		}
+	}
+	if n := len(luaEffects); n > 0 {
+		log.Printf("discovered %d Lua effect(s)", n)
+	}
+
 	if err := vad.InitRuntime(); err != nil {
 		log.Printf("warning: ONNX runtime init failed (VAD unavailable): %v", err)
 	}
@@ -110,12 +122,15 @@ func Run() {
 
 func (d *Daemon) setup() {
 	d.buildTray()
-	go d.serveIPC()
-	go d.refreshTray()
 
+	// Start capture before accepting IPC commands so a device-change
+	// request cannot race with the initial Start() call.
 	if err := d.capturer.Start(); err != nil {
 		log.Printf("warning: capture failed to start: %v", err)
 	}
+
+	go d.serveIPC()
+	go d.refreshTray()
 
 	log.Print("daemon started")
 }
@@ -123,8 +138,12 @@ func (d *Daemon) setup() {
 func (d *Daemon) teardown() {
 	close(d.done)
 	d.ipcLn.Close()
-	d.player.Stop()
-	d.capturer.Stop()
+	d.cfgMu.RLock()
+	player := d.player
+	capturer := d.capturer
+	d.cfgMu.RUnlock()
+	player.Stop()
+	capturer.Stop()
 	if d.detector != nil {
 		d.detector.Close()
 	}
@@ -198,8 +217,11 @@ func (d *Daemon) refreshTray() {
 		case <-ticker.C:
 			avail := d.ring.Available()
 			capacity := d.ring.Capacity()
+			d.cfgMu.RLock()
+			capturer := d.capturer
+			d.cfgMu.RUnlock()
 			capturing := ""
-			if d.capturer.Running() {
+			if capturer.Running() {
 				capturing = " [capturing]"
 			}
 			d.menuStatus.SetTitle(fmt.Sprintf("Buffer: %.0fs / %.0fs%s", avail, capacity, capturing))

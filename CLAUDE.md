@@ -12,11 +12,10 @@ internal/
   clip/              Active clip management (snapshot from ring buffer)
   config/            TOML configuration (%APPDATA%\rewind\config.toml)
   daemon/            Lifecycle, systray, IPC dispatch
-  dsp/               Built-in DSP effects (echo, reverb, bandpass, gain, pitch) [not yet implemented]
+  dsp/               Built-in DSP effects (echo, reverb, bandpass, gain, pitch, speed, scratch), WAV sample overlay, and Lua plugin runner
   icon/              Embedded tray icon
   ipc/               Named pipe server/client, JSON protocol
   vad/               Silero VAD via ONNX Runtime (model embedded via go:embed)
-  yassify/           Effect chain engine (built-in + Lua plugins) [not yet implemented]
 ```
 
 ## Key design decisions

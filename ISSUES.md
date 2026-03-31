@@ -2,11 +2,7 @@
 
 ## Open
 
-### #4 - DSP effects engine
-Implement built-in DSP effects: echo, reverb, bandpass filter, gain, pitch shift, speed. Parameterized via TOML config.
-
-### #5 - Lua plugin system
-Integrate gopher-lua for scriptable effects. Expose audio/dsp/samples API to Lua scripts. Auto-discover .lua files in %APPDATA%\rewind\effects\.
+(none)
 
 ## Closed
 
@@ -32,7 +28,7 @@ clip.SaveWAV used per-sample streaming writes with no error checking. Rewrote to
 Tray status refresh loop had no stop signal. Now selects on a done channel closed during teardown.
 
 ### #12 - Stub commands returned fake success
-handlePlay and handleStop returned success despite being unimplemented. Now return explicit "not yet implemented" errors.
+handlePlay and handleStop returned success despite being unimplemented. Fixed: both are now fully implemented via WASAPI render (see #2).
 
 ### #13 - Autostart requested admin elevation
 schtasks /RL HIGHEST triggered UAC on login. Changed to /RL LIMITED.
@@ -48,6 +44,12 @@ Ring.Write and Ring.Snapshot used `cap` as a local variable name. Renamed to `si
 
 ### #3 - Silero VAD integration
 Implemented in internal/vad/. Silero VAD v5 model embedded via go:embed, inference via onnxruntime-go. Downsamples 48kHz stereo to 16kHz mono, processes 512-sample frames, groups voiced frames into segments with padding and merging. Wired into `clip voice` command for auto-trimming.
+
+### #4 - DSP effects engine
+Implemented in internal/dsp/. Built-in effects: gain, echo, reverb (Schroeder), biquad filter (bandpass/lowpass/highpass), pitch shift, speed change, DJ scratch (composition effect with chirp ramp), WAV sample overlay. Effect chain dispatched via Apply(). Wired into handleYassify. New defaults: scratch effect, reverb effect, "remix" preset.
+
+### #5 - Lua plugin system
+Implemented in internal/dsp/lua.go. Lua scripts in %APPDATA%\rewind\effects\ are auto-discovered at daemon startup. Scripts receive audio samples, metadata, and a cfg table as globals. A sandboxed dsp module exposes built-in effects (gain, echo, reverb, filter, pitch, speed, clamp) for composition. Fresh VM per execution, no os/io/debug libs.
 
 ### #2 - WASAPI render playback
 Implemented in internal/audio/render.go. Player struct mirrors Capturer lifecycle: COM on locked OS thread, event-driven buffer feeding, stop/done channels. Dispatch wired for play/stop commands. Capture device change now restarts capture automatically.

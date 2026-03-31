@@ -40,13 +40,13 @@ rewind quit                          # stop daemon
 
 `%APPDATA%\rewind\config.toml` - created with defaults on first run.
 
-## Effects (planned)
+## Effects
 
 Three tiers:
 
-1. **Built-in DSP** - configured in TOML (echo, reverb, bandpass, gain, pitch shift) -- not yet implemented
-2. **Lua scripts** - drop `.lua` files into `%APPDATA%\rewind\effects\` -- not yet implemented
-3. **Presets** - named chains of built-in and Lua effects in TOML -- preset resolution works, effects pending
+1. **Built-in DSP** - configured in TOML (echo, reverb, bandpass/lowpass/highpass, gain, pitch shift, speed, scratch, WAV sample overlay)
+2. **Lua scripts** - drop `.lua` files into `%APPDATA%\rewind\effects\` for auto-discovery at startup
+3. **Presets** - named chains of built-in and Lua effects in TOML (e.g. "airhorn", "radio", "remix")
 
 ## License
 

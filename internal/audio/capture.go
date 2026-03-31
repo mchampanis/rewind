@@ -212,7 +212,7 @@ func (c *Capturer) captureLoop() {
 		default:
 		}
 
-		if r != 0 && r != 258 { // 258 = WAIT_TIMEOUT
+		if r != 0 && r != waitTimeout {
 			log.Printf("capture: wait error: %d", r)
 			time.Sleep(10 * time.Millisecond)
 			continue

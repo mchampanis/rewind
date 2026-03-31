@@ -62,6 +62,7 @@ type EffectConfig struct {
 	HighHz  int     `toml:"high_hz,omitempty"`
 	DelayMs int     `toml:"delay_ms,omitempty"`
 	Decay   float64 `toml:"decay,omitempty"`
+	Reverb  bool    `toml:"reverb,omitempty"` // multi-tap reverb instead of simple echo
 	Gain    float64 `toml:"gain,omitempty"`
 	Shift   float64 `toml:"shift,omitempty"` // pitch shift semitones
 	Speed   float64 `toml:"speed,omitempty"` // playback speed multiplier
@@ -83,6 +84,7 @@ func defaultConfig() Config {
 			Presets: map[string]PresetConfig{
 				"airhorn": {Effects: []string{"airhorn"}},
 				"radio":   {Effects: []string{"radio", "echo"}},
+				"remix":   {Effects: []string{"scratch", "reverb"}},
 			},
 			Effects: map[string]EffectConfig{
 				"airhorn": {
@@ -100,6 +102,15 @@ func defaultConfig() Config {
 					Filter: "bandpass",
 					LowHz:  300,
 					HighHz: 3400,
+				},
+				"scratch": {
+					Type: "scratch",
+				},
+				"reverb": {
+					Type:    "dsp",
+					DelayMs: 40,
+					Decay:   0.65,
+					Reverb:  true,
 				},
 			},
 		},

@@ -15,8 +15,10 @@ func createEvent() (uintptr, error) {
 	return uintptr(h), nil
 }
 
+const waitTimeout = 258 // WAIT_TIMEOUT
+
 // waitForSingleObject waits on a handle for the given timeout in milliseconds.
-// Returns 0 (WAIT_OBJECT_0) on signal, 258 (WAIT_TIMEOUT) on timeout.
+// Returns 0 (WAIT_OBJECT_0) on signal, waitTimeout on timeout.
 func waitForSingleObject(handle uintptr, timeoutMs uint32) uint32 {
 	r, _ := windows.WaitForSingleObject(windows.Handle(handle), timeoutMs)
 	return r

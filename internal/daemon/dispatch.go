@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 
 	"rewind/internal/audio"
 	"rewind/internal/config"
+	"rewind/internal/dsp"
 	"rewind/internal/ipc"
 	"rewind/internal/vad"
 )
@@ -43,7 +45,7 @@ func (d *Daemon) dispatch(cmd ipc.Command) ipc.Response {
 		return okResp(nil)
 
 	default:
-		return ipc.Response{OK: false, Error: "unknown command: " + cmd.Name}
+		return errResp(fmt.Errorf("unknown command: %s", cmd.Name))
 	}
 }
 
@@ -51,6 +53,8 @@ func (d *Daemon) handleStatus() ipc.Response {
 	d.cfgMu.RLock()
 	captureDevice := d.cfg.Device.Capture
 	playbackDevice := d.cfg.Device.Playback
+	capturer := d.capturer
+	player := d.player
 	d.cfgMu.RUnlock()
 
 	data := map[string]any{
@@ -60,8 +64,8 @@ func (d *Daemon) handleStatus() ipc.Response {
 		"channels":           d.ring.Channels(),
 		"capture_device":     captureDevice,
 		"playback_device":    playbackDevice,
-		"capturing":          d.capturer.Running(),
-		"playing":            d.player.Playing(),
+		"capturing":          capturer.Running(),
+		"playing":            player.Playing(),
 	}
 
 	if c := d.clip.Get(); c != nil {
@@ -77,10 +81,13 @@ func (d *Daemon) handleClip(args []string) ipc.Response {
 	durationStr := ""
 
 	for _, arg := range args {
-		if arg == "voice" {
+		switch {
+		case arg == "voice":
 			voice = true
-		} else {
+		case durationStr == "":
 			durationStr = arg
+		default:
+			return errResp(fmt.Errorf("clip: unexpected argument: %q", arg))
 		}
 	}
 
@@ -88,14 +95,14 @@ func (d *Daemon) handleClip(args []string) ipc.Response {
 	if durationStr != "" {
 		n, err := strconv.ParseFloat(durationStr, 64)
 		if err != nil || n <= 0 {
-			return ipc.Response{OK: false, Error: "clip: duration must be a positive number"}
+			return errResp(fmt.Errorf("clip: duration must be a positive number"))
 		}
 		seconds = n
 	}
 
 	samples, actual := d.ring.Snapshot(seconds)
 	if len(samples) == 0 {
-		return ipc.Response{OK: false, Error: "buffer is empty"}
+		return errResp(fmt.Errorf("buffer is empty"))
 	}
 
 	d.clip.Set(samples, d.ring.SampleRate(), d.ring.Channels())
@@ -115,7 +122,7 @@ func (d *Daemon) handleClip(args []string) ipc.Response {
 			return errResp(fmt.Errorf("VAD: %w", err))
 		}
 		if len(segments) == 0 {
-			return ipc.Response{OK: false, Error: "no voice detected in clip"}
+			return errResp(fmt.Errorf("no voice detected in clip"))
 		}
 		trimmed := vad.TrimToSegments(samples, d.ring.SampleRate(), d.ring.Channels(), segments)
 		d.clip.Set(trimmed, d.ring.SampleRate(), d.ring.Channels())
@@ -130,10 +137,14 @@ func (d *Daemon) handleClip(args []string) ipc.Response {
 func (d *Daemon) handlePlay() ipc.Response {
 	c := d.clip.Get()
 	if c == nil {
-		return ipc.Response{OK: false, Error: "no active clip (use 'clip' first)"}
+		return errResp(fmt.Errorf("no active clip (use 'clip' first)"))
 	}
 
-	if err := d.player.Play(c.Samples(), c.SampleRate(), c.Channels()); err != nil {
+	d.cfgMu.RLock()
+	player := d.player
+	d.cfgMu.RUnlock()
+
+	if err := player.Play(c.Samples(), c.SampleRate(), c.Channels()); err != nil {
 		return errResp(err)
 	}
 
@@ -144,17 +155,21 @@ func (d *Daemon) handlePlay() ipc.Response {
 }
 
 func (d *Daemon) handleStop() ipc.Response {
-	if !d.player.Playing() {
-		return ipc.Response{OK: false, Error: "nothing is playing"}
+	d.cfgMu.RLock()
+	player := d.player
+	d.cfgMu.RUnlock()
+
+	if !player.Playing() {
+		return errResp(fmt.Errorf("nothing is playing"))
 	}
-	d.player.Stop()
+	player.Stop()
 	return okResp(nil)
 }
 
 func (d *Daemon) handleSave(args []string) ipc.Response {
 	c := d.clip.Get()
 	if c == nil {
-		return ipc.Response{OK: false, Error: "no active clip (use 'clip' first)"}
+		return errResp(fmt.Errorf("no active clip (use 'clip' first)"))
 	}
 
 	path := argAt(args, 0)
@@ -176,12 +191,12 @@ func (d *Daemon) handleSave(args []string) ipc.Response {
 
 func (d *Daemon) handleYassify(args []string) ipc.Response {
 	if len(args) == 0 {
-		return ipc.Response{OK: false, Error: "yassify: specify one or more effect names or presets"}
+		return errResp(fmt.Errorf("yassify: specify one or more effect names or presets"))
 	}
 
 	c := d.clip.Get()
 	if c == nil {
-		return ipc.Response{OK: false, Error: "no active clip (use 'clip' first)"}
+		return errResp(fmt.Errorf("no active clip (use 'clip' first)"))
 	}
 
 	// Resolve presets and effects into a flat effect chain.
@@ -194,13 +209,23 @@ func (d *Daemon) handleYassify(args []string) ipc.Response {
 			chain = append(chain, name)
 		}
 	}
+	// Copy effects map so Apply works on owned data outside the lock.
+	effects := make(map[string]config.EffectConfig, len(d.cfg.Yassify.Effects))
+	for k, v := range d.cfg.Yassify.Effects {
+		effects[k] = v
+	}
 	d.cfgMu.RUnlock()
 
-	// TODO: apply effect chain (built-in DSP + Lua plugins)
+	samples, err := dsp.Apply(c.Samples(), c.SampleRate(), c.Channels(), chain, effects)
+	if err != nil {
+		return errResp(fmt.Errorf("yassify: %w", err))
+	}
+
+	c.SetSamples(samples)
+
 	return okResp(map[string]any{
 		"effects":    chain,
 		"duration_s": c.Duration(),
-		"status":     "not yet implemented",
 	})
 }
 
@@ -232,17 +257,26 @@ func (d *Daemon) handleDevice(args []string) ipc.Response {
 		err := config.Save(d.cfg)
 		if err != nil {
 			d.cfg.Device.Capture = old
-		}
-		d.cfgMu.Unlock()
-		if err != nil {
+			d.cfgMu.Unlock()
 			return errResp(err)
 		}
-		// Restart capture with the new device.
-		d.capturer.Stop()
-		d.capturer = audio.NewCapturer(d.ring, name)
-		if err := d.capturer.Start(); err != nil {
-			return okResp(map[string]any{"capture": name, "warning": fmt.Sprintf("capture restart failed: %v", err)})
+		// Restart capture with the new device. If it fails, roll back
+		// the config and keep the old capturer running.
+		prev := d.capturer
+		prev.Stop()
+		next := audio.NewCapturer(d.ring, name)
+		if err := next.Start(); err != nil {
+			d.cfg.Device.Capture = old
+			_ = config.Save(d.cfg)
+			d.capturer = audio.NewCapturer(d.ring, old)
+			if startErr := d.capturer.Start(); startErr != nil {
+				log.Printf("device: failed to restore capture on %q: %v", old, startErr)
+			}
+			d.cfgMu.Unlock()
+			return errResp(fmt.Errorf("capture restart failed: %w", err))
 		}
+		d.capturer = next
+		d.cfgMu.Unlock()
 		return okResp(map[string]any{"capture": name})
 
 	case "playback":
@@ -259,11 +293,14 @@ func (d *Daemon) handleDevice(args []string) ipc.Response {
 		err := config.Save(d.cfg)
 		if err != nil {
 			d.cfg.Device.Playback = old
-		}
-		d.cfgMu.Unlock()
-		if err != nil {
+			d.cfgMu.Unlock()
 			return errResp(err)
 		}
+		// Replace the player so the next play command targets the new device.
+		// Stop any in-progress playback first.
+		d.player.Stop()
+		d.player = audio.NewPlayer(name)
+		d.cfgMu.Unlock()
 		return okResp(map[string]any{"playback": name})
 
 	case "":
@@ -277,7 +314,7 @@ func (d *Daemon) handleDevice(args []string) ipc.Response {
 		})
 
 	default:
-		return ipc.Response{OK: false, Error: "device: expected list|capture|playback"}
+		return errResp(fmt.Errorf("device: expected list|capture|playback"))
 	}
 }
 

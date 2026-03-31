@@ -57,6 +57,9 @@ func handleConn(conn net.Conn, handler Handler) {
 		// Reset deadline after response, so slow handlers don't eat into the next read's budget.
 		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("ipc: connection error: %v", err)
+	}
 }
 
 func writeResponse(conn net.Conn, r Response) {

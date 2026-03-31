@@ -2,3 +2,6 @@
 *.syso
 *.dll
 *.log
+
+.claude
+ONGOING.md

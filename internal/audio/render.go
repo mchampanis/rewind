@@ -211,7 +211,7 @@ func (p *Player) renderLoop(samples []float32, sampleRate, channels int) {
 		default:
 		}
 
-		if r != 0 && r != 258 { // 258 = WAIT_TIMEOUT
+		if r != 0 && r != waitTimeout {
 			log.Printf("render: wait error: %d", r)
 			time.Sleep(10 * time.Millisecond)
 			continue
@@ -269,7 +269,14 @@ func writeFloat32ToDevice(dst *byte, samples []float32, bitsPerSample int, isFlo
 
 	if isFloat && bitsPerSample == 32 {
 		out := unsafe.Slice((*float32)(unsafe.Pointer(dst)), totalSamples)
-		copy(out, samples)
+		for i, s := range samples {
+			if s > 1.0 {
+				s = 1.0
+			} else if s < -1.0 {
+				s = -1.0
+			}
+			out[i] = s
+		}
 		return
 	}
 
